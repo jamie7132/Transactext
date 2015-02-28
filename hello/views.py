@@ -21,6 +21,9 @@ def hello_monkey():
  
 if __name__ == "__main__":
     app.run(debug=True)
+
+#above this line is the twilio stuff and below is the heroku
+
 # Create your views here.
 
 def index(request):
