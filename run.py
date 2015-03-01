@@ -23,14 +23,10 @@ def matchmaker():
         u = User.Query.filter(objectId=it.ownerId)[0]
         for match in matches:
             if match.ownerId != it.ownerId and match.quantity > it.quantity and match.price*it.quantity <= u.balance:
-                d_user = DwollaUser(str(u.dwollaAuth))
+                buyer = User.Query.filter(objectId=str(it.ownerId))[0]
                 seller = User.Query.filter(objectId=str(match.ownerId))[0]
                 seller_id = seller.dwollaId
-                print u.username
-                print u.dwollaAuth
-                print seller.username
-                print seller.dwollaAuth
-                transaction = d_user.send_funds(float(it.price), str(seller_id), int(u.pin))
+                transactions.send(str(seller_id), float(it.quantity*match.price), False, buyer.dwollaAuth, buyer.pin)
 
                 match.quantity -= it.quantity
                 match.save()
@@ -42,15 +38,10 @@ def matchmaker():
 
                 print transaction
             elif match.ownerId != it.ownerId and match.quantity == it.quantity and match.price*it.quantity <= User.Query.filter(objectId=it.ownerId)[0].balance:
-                d_user = DwollaUser(str(u.dwollaAuth))
+                buyer = User.Query.filter(objectId=str(it.ownerId))[0]
                 seller = User.Query.filter(objectId=str(match.ownerId))[0]
                 seller_id = seller.dwollaId
-                print u.username
-                print u.dwollaAuth
-                print seller.username
-                print seller.dwollaAuth
-                print seller_id
-                transaction = d_user.send_funds(float(it.price), str(seller_id), int(u.pin))
+                transactions.send(str(seller_id), float(it.quantity*match.price), False, str(buyer.dwollaAuth), str(buyer.pin))
 
                 u.balance -= it.quantity*match.price
                 u.save()
@@ -77,11 +68,13 @@ def main():
         u = User.signup(str(user), "", phone=str(user))
     else:
         u = User.login(str(user), "")
-        constants.access_token = u.dwollaAuth
+        constants.access_token = str(u.dwollaAuth)
+        constants.pin = str(u.pin)
+
     if body.lower().startswith('register'):
         u.dwollaId = str(tokens[1])
         u.pin = str(tokens[2])
-        constants.pin = u.pin
+        constants.pin = str(u.pin)
         u.save()
         oauth_token = oauth.genauthurl('http://localhost:5000/return?user=' + str(u.username))
         resp.message(str(oauth_token))
@@ -117,11 +110,11 @@ def oauth_return():
     user_id = request.args.get('user')
 
     token = oauth.get(code, 'http://localhost:5000/return?user=' + str(user_id))
-    constants.access_token = token['access_token']
+    constants.access_token = str(token['access_token'])
   
     u = User.Query.filter(username=str(user_id))[0] 
-    u.dwollaAuth = token['access_token']
-    u.balance = accounts.balance()
+    u.dwollaAuth = str(token['access_token'])
+    u.balance = float(accounts.balance())
     u.save()
 
     return ""
