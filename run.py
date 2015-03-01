@@ -1,6 +1,7 @@
 from flask import Flask, request, redirect
 import twilio.twiml
 from dwolla import oauth, accounts, transactions, constants
+from dwolla import DwollaClientApp, DwollaUser
 from parse_rest.connection import register
 from parse_rest.datatypes import Object
 from parse_rest.user import User
@@ -8,45 +9,62 @@ from parse_rest.user import User
 register('SEZAS4U2ITXk2ET9aIxEnZIH8HkuRfj4IYIDSvnA', 'cf87OLoFdAbeFPBRT6ZFwtVDqak8S9rVfJlnXEGX',master_key='V6WiPiLHBF56SuOHwEV0BkC2MSqJpF8gaFG32Jn0')
 app = Flask(__name__)
 
+# Instantiate a new Dwolla client
+Dwolla = DwollaClientApp("P/LZrllLoo1ebneqK1EXfS9JzgAQnncvOrZXOOIS3T3+o7YvhT", "s3WSCkaAMu9VZYzSDznfbdVaZFef0/GU+AIUV1I+29TVr/+0j+")
+
 class MarketItem(Object):
     pass
 
+#need to do consolidation later
 def matchmaker():
     buy = MarketItem.Query.filter(forSale=False)
     for it in buy:
         matches = MarketItem.Query.filter(forSale=True, item=str(it.item), price=float(it.price))
+        u = User.Query.filter(objectId=it.ownerId)[0]
         for match in matches:
-            u = User.Query.filter(objectId=it.ownerId)[0]
-            if match.quantity > it.quantity and match.price*it.quantity <= u.balance:
+            if match.ownerId != it.ownerId and match.quantity > it.quantity and match.price*it.quantity <= u.balance:
+                d_user = DwollaUser(str(u.dwollaAuth))
+                seller = User.Query.filter(objectId=str(match.ownerId))[0]
+                seller_id = seller.dwollaId
+                print u.username
+                print u.dwollaAuth
+                print seller.username
+                print seller.dwollaAuth
+                transaction = d_user.send_funds(float(it.price), str(seller_id), int(u.pin))
+
                 match.quantity -= it.quantity
                 match.save()
                 u.balance -= it.quantity*match.price
                 u.save()
+                seller.balance += it.quantity*match.price
+                seller.save()
                 it.delete()
-            elif match.quantity == it.quantity and match.price*it.quantity <= User.Query.filter(objectId=it.ownerId)[0].balance:
+
+                print transaction
+            elif match.ownerId != it.ownerId and match.quantity == it.quantity and match.price*it.quantity <= User.Query.filter(objectId=it.ownerId)[0].balance:
+                d_user = DwollaUser(str(u.dwollaAuth))
+                seller = User.Query.filter(objectId=str(match.ownerId))[0]
+                seller_id = seller.dwollaId
+                print u.username
+                print u.dwollaAuth
+                print seller.username
+                print seller.dwollaAuth
+                print seller_id
+                transaction = d_user.send_funds(float(it.price), str(seller_id), int(u.pin))
+
                 u.balance -= it.quantity*match.price
                 u.save()
+                seller.balance += it.quantity*match.price
+                seller.save()
                 match.delete()
                 it.delete()
 
-    """
-        matches = MarketItem.Query.filter(forSale=True, item=str(it.item))
-        match_best = {'item': None, 'price': None}
-        for match in matches:
-            match_best['item'] = match.item
-            if match.quantity >= it.quantity and match.price*it.quantity <= User.Query.filter(objectId=it.ownerId)[0].balance:
-                print str(match.item) + " " + str(match.price)
-                match_best['item'] = match.item
-                if match_best['price'] == None or match_best['price'] > match.price:
-                    match_best['price'] = match.price
-    print match_best
-    """ 
+                print transaction
+
 @app.route("/", methods=['GET', 'POST'])
 def main():
     """Respond to incoming calls with a simple text message."""
 
-    #print accounts.basic('832-515-2241')
-    #print request.values
     body = request.values['Body']
     tokens = body.split()
 
@@ -59,10 +77,16 @@ def main():
         u = User.signup(str(user), "", phone=str(user))
     else:
         u = User.login(str(user), "")
-    
-    if body.lower() == 'register':
+        constants.access_token = u.dwollaAuth
+    if body.lower().startswith('register'):
+        u.dwollaId = str(tokens[1])
+        u.pin = str(tokens[2])
+        constants.pin = u.pin
+        u.save()
         oauth_token = oauth.genauthurl('http://localhost:5000/return?user=' + str(u.username))
         resp.message(str(oauth_token))
+    elif body.lower() == "balance":
+        resp.message("Your balance is $" + str("%.2f" % round(accounts.balance(), 2)))
     elif body.lower().startswith('sell'):
         item = MarketItem(ownerId=u.objectId, forSale=True, item=str(tokens[2]), quantity=float(tokens[1]), price=float(tokens[4]))
         item.save()
@@ -71,21 +95,19 @@ def main():
         order = MarketItem(ownerId=u.objectId, forSale=False, item=str(tokens[2]), quantity=float(tokens[1]), price=float(tokens[4]))
         order.save()
         matchmaker()
+    elif body.lower().startswith("list"):
+        orders = MarketItem.Query.all().order_by('item')
+        msg = ""
+        for order in orders:
+            if order.forSale:
+                msg += "For Sale: " + str(order.quantity) + " " + str(order.item) + " for $" + str("%.2f" % round(order.price, 2)) + "\n"
+            else:
+                msg += "Seeking: " + str(order.quantity) + " " + str(order.item) + " for $" + str("%.2f" % round(order.price, 2)) + "\n"
+        resp.message(str(msg))
     else:
         resp.message("Invalid request - text 'help' for a list of option")
-    """
-    elif len(tokens) == 2:
-        if body.lower().startswith('pay'):
-            num_to = request.values['To']
-            num_from = request.values['From']
-            print request.values
-            resp.message("Paying $" + str(tokens[1]))
-        elif body.lower().startswith('request'):
-            resp.message("Request $" + str(tokens[1]))
-        else:
-            resp.message("Invalid demand - Message did not start with 'PAY' or 'REQUEST'")
-    """
-        #resp.message("Invalid demand - Message must be of format: 'PAY'/'REQUEST' AMOUNT")
+   
+    print resp
     
     return str(resp)
 
@@ -98,7 +120,7 @@ def oauth_return():
     constants.access_token = token['access_token']
   
     u = User.Query.filter(username=str(user_id))[0] 
-    u.dwollaAuth = constants.access_token
+    u.dwollaAuth = token['access_token']
     u.balance = accounts.balance()
     u.save()
 
