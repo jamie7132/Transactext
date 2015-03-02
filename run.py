@@ -26,7 +26,7 @@ def matchmaker():
                 buyer = User.Query.filter(objectId=str(it.ownerId))[0]
                 seller = User.Query.filter(objectId=str(match.ownerId))[0]
                 seller_id = seller.dwollaId
-                transactions.send(str(seller_id), float(it.quantity*match.price), False, buyer.dwollaAuth, buyer.pin)
+                transactions.send(str(seller_id), float(it.quantity*match.price), False, str(buyer.dwollaAuth), str(buyer.pin))
 
                 match.quantity -= it.quantity
                 match.save()
